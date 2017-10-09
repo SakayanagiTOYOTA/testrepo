@@ -1,0 +1,43 @@
+<!DOCTYPE html><html><head>
+ <meta charset='UTF-8'><meta name='viewport' content='width=device-width, user-scalable=no'>
+ <title>Setting</title>
+<style type='text/css'>
+    input[type=range]{height:20pt;width:40%}
+    input[type=submit]{height:20pt;width:100%}
+    input[type=checkbox]{height:20pt;width:20pt;}
+</style>
+<script type='text/javascript'>
+function update(){
+  document.getElementById('S0').innerHTML='('+document.inputform.Rng_mn0.value+'-'+document.inputform.Rng_mx0.value + ')';
+</script></head>
+<body onload='update()'>
+<H1>Setting</H1>
+<p>[<a href='/'>main</a>] [<a href='/Propo'>Propo mode</a>] [<a href='/List'>IP List</a>]</p>
+<form name='inputform' action='/Setting' method='POST'>
+<H2>Range</H2>
+    Servo0:<div id='S0'>(0-180)</div><br>
+    0<input type='range' name='Rng_mn0' min='0'  max='90'  step='1' onChange='update()'>90
+     <input type='range' name='Rng_mx0' min='90' max='180' step='1' onChange='update()'>180<br>
+    Servo1:<div id='S0'>(0-180)</div><br>
+    0<input type='range' name='Rng_mn1' min='0'  max='90'  step='1' onChange='update()'>90
+     <input type='range' name='Rng_mx1' min='90' max='180' step='1' onChange='update()'>180<br>
+    Servo2:<div id='S0'>(0-180)</div><br>
+    0<input type='range' name='Rng_mn2' min='0'  max='90'  step='1' onChange='update()'>90
+     <input type='range' name='Rng_mx2' min='90' max='180' step='1' onChange='update()'>180<br>
+    Servo3:<div id='S0'>(0-180)</div><br>
+    0<input type='range' name='Rng_mn3' min='0'  max='90'  step='1' onChange='update()'>90
+     <input type='range' name='Rng_mx3' min='90' max='180' step='1' onChange='update()'>180<br>
+<H2>Reverse</H2>
+    Servo0:<input type='checkbox' name='Rvs0' value='1'><br>
+    Servo0:<input type='checkbox' name='Rvs1' value='1'><br>
+    Servo0:<input type='checkbox' name='Rvs2' value='1'><br>
+    Servo0:<input type='checkbox' name='Rvs3' value='1'><br>
+<H2>BroadCast</H2>
+    ON/OFF:<input type='checkbox' name='Bcast' value='1'><br>
+<H2>WiFi Setting</H2>
+SSID:<input type='text' name='ssid' maxlength='32'><br>
+PASS:<input type='text' name='pass' maxlength='63'><br>
+<br><input type='submit' name='SUBMIT' value='Submit'>
+</form>
+</body>
+</html>

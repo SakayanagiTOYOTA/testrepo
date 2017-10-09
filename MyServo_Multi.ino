@@ -7,8 +7,8 @@
 //  マイコン：wroom-02
 //  IO:
 //   P4,5,12,13 サーボ
-//   P14 WiFiモード選択 1: WIFI_AP, 0:WIFI_STA
-//   P16 SSID選択 1:SERVO_AP, 0:SERVO_AP2
+//   P14 WiFiモード選択 1: WIFI_AP(ESP_固有ID), 0:WIFI_STA(設定値)
+//   P16 未使用
 // ****************************************************************
 
 #include <ESP8266WiFi.h>
@@ -64,6 +64,7 @@ bool Reverse[4];  // 1byte
 char myssid[33]; // 33byte
 char mypass[64]; // 64byte
 #define EEPROM_NUM (8+1+33+64)
+bool Bcast=false;
 
 //ポート設定
 #if 0
@@ -72,9 +73,7 @@ char mypass[64]; // 64byte
  #define ServoCH2 5
  #define ServoCH3 12
  #define ServoCH4 13
- //AP切替
  #define DipSW1 16
- //HOST切替
  #define DipSW2 14
 #else
 //シンプル版
@@ -82,11 +81,10 @@ char mypass[64]; // 64byte
  #define ServoCH2 12
  #define ServoCH3 13
  #define ServoCH4 15
- //AP切替
  #define DipSW1 5
- //HOST切替
  #define DipSW2 4
 #endif
+
 //------------------------------
 // RCW Controller対応
 //------------------------------
@@ -109,7 +107,7 @@ typedef struct {
 //*******************************************************************************
 //* プロトタイプ宣言
 //*******************************************************************************
-bool say_hello(IPAddress IP);
+//bool say_hello(IPAddress IP);
 void servo_ctrl(void);
 
 //*******************************************************************************
@@ -139,55 +137,56 @@ void handlePropo() {
 // -----------------------------------
 // IP List
 //------------------------------------
-void handleList() {
-  String content;
-  Serial.println("IP List");
-  
-  content = "\
-<!DOCTYPE html><html><head>\
- <meta charset='UTF-8'><meta name='viewport' content='width=device-width, user-scalable=no'>\
- <title>IP List</title>\
-<style type='text/css'>\
-input[type=checkbox]{height:20pt;width:20pt}\
-input[type=submit]{height:20pt;width:100%}\
-</style></head>\
-<body>\
-<H1>IP List</H1>\
-<p>[<a href='/'>main</a>] [<a href='/Setting'>Setting</a>]</p>\
-HOST:<a href='http://" + HOST_IP.toString() + "'>" + HOST_IP.toString() + "</a><br>\
-Local IP:<a href='http://" + WiFi.localIP().toString() + "'>" + WiFi.localIP().toString() + "</a><br>\
-";
-  if(HostMode){
-    content += "<form name='inputform' action='/SetSync' method='POST' target='iframe'>";
-    for (int i = 0; i < IP_Num; i++) {
-      content += "<input type='checkbox' name='IP" + String(i) + "' value='" + IP_List[i].toString() + "'";
-      if (IP_sync[i]) content += " checked='checked'";
-      content += ">";
-      content += "<a href='http://";
-      content += IP_List[i].toString();
-      content += "'>";
-      content += IP_List[i].toString();
-      content += "</a><br>";
-    }
-    content += "\
-<br><input type='submit' name='SUBMIT' value='Submit'>\
-</form>\
-<p>接続しているコントローラーの一覧です。チェックを付けたコントローラーは連動します。</p>\
-<iframe name='iframe' style='display:none'></iframe>\
-";
-  }
-  content +="\
-</body>\
-</html>\
-";
-  server.send(200, "text/html", content);
-}
+//void handleList() {
+//  String content;
+//  Serial.println("IP List");
+//  
+//  content = "\
+//<!DOCTYPE html><html><head>\
+// <meta charset='UTF-8'><meta name='viewport' content='width=device-width, user-scalable=no'>\
+// <title>IP List</title>\
+//<style type='text/css'>\
+//input[type=checkbox]{height:20pt;width:20pt}\
+//input[type=submit]{height:20pt;width:100%}\
+//</style></head>\
+//<body>\
+//<H1>IP List</H1>\
+//<p>[<a href='/'>main</a>] [<a href='/Setting'>Setting</a>]</p>\
+//HOST:<a href='http://" + HOST_IP.toString() + "'>" + HOST_IP.toString() + "</a><br>\
+//Local IP:<a href='http://" + WiFi.localIP().toString() + "'>" + WiFi.localIP().toString() + "</a><br>\
+//";
+//  if(HostMode){
+//    content += "<form name='inputform' action='/SetSync' method='POST' target='iframe'>";
+//    for (int i = 0; i < IP_Num; i++) {
+//      content += "<input type='checkbox' name='IP" + String(i) + "' value='" + IP_List[i].toString() + "'";
+//      if (IP_sync[i]) content += " checked='checked'";
+//      content += ">";
+//      content += "<a href='http://";
+//      content += IP_List[i].toString();
+//      content += "'>";
+//      content += IP_List[i].toString();
+//      content += "</a><br>";
+//    }
+//    content += "\
+//<br><input type='submit' name='SUBMIT' value='Submit'>\
+//</form>\
+//<p>接続しているコントローラーの一覧です。チェックを付けたコントローラーは連動します。</p>\
+//<iframe name='iframe' style='display:none'></iframe>\
+//";
+//  }
+//  content +="\
+//</body>\
+//</html>\
+//";
+//  server.send(200, "text/html", content);
+//}
 
 // -----------------------------------
 // Setting
 //------------------------------------
 void handleSetting() {
   Serial.println("Setting");
+
   int i, j;
   bool flg = false;
   // 設定反映
@@ -196,60 +195,32 @@ void handleSetting() {
     for (i = 0; i < ServoCH; i++) {
       Reverse[i] = false;
     }
+    Bcast = false;
   }
   for (i = 0; i < ServoCH; i++) {
     if (server.hasArg("Rng_mn" + String(i))) Range[i][0] = atoi(server.arg("Rng_mn" + String(i)).c_str());
     if (server.hasArg("Rng_mx" + String(i))) Range[i][1] = atoi(server.arg("Rng_mx" + String(i)).c_str());
     if (server.hasArg("Rvs"   + String(i))) Reverse[i]  = true;
   }
- if (server.hasArg("ssid")) strcpy(myssid,server.arg("ssid").c_str());
- if (server.hasArg("pass")) strcpy(mypass,server.arg("pass").c_str());
+  if (server.hasArg("Bcast")) Bcast = true;
+  if (server.hasArg("ssid")) strcpy(myssid,server.arg("ssid").c_str());
+  if (server.hasArg("pass")) strcpy(mypass,server.arg("pass").c_str());
 
-  String content = "\
-<!DOCTYPE html><html><head>\
- <meta charset='UTF-8'><meta name='viewport' content='width=device-width, user-scalable=no'>\
- <title>Setting</title>\
-<style type='text/css'>\
-    input[type=range]{height:20pt;width:40%}\
-    input[type=submit]{height:20pt;width:100%}\
-    input[type=checkbox]{height:20pt;width:20pt;}\
-</style>\
-<script type='text/javascript'>\
-function update(){\
-";
-  for (i = 0; i < ServoCH; i++) {
-    content += "document.getElementById('S" + String(i) + "').innerHTML='('+document.inputform.Rng_mn" + String(i) + ".value+'-'+document.inputform.Rng_mx" + String(i) + ".value + ')';";
+  
+  File fd = SPIFFS.open("/Setting.html","r");
+  String html = fd.readString();
+  fd.close();
+  for(i=0;i < ServoCH; i++){
+    html.replace("name='Rng_mn"+String(i)+"'","name='Rng_mn"+String(i)+"' value='" + String(Range[i][0]) + "'");
+    html.replace("name='Rng_mx"+String(i)+"'","name='Rng_mx"+String(i)+"' value='" + String(Range[i][1]) + "'");
+    if (Reverse[i]) html.replace("name='Rvs"+String(i)+"'" ,"name='Rvs"+String(i)+"' checked='checked'");
   }
-  content += "\
-}\
-</script></head>\
-<body onload='update()'>\
-<H1>Setting</H1>\
-<p>[<a href='/'>main</a>] [<a href='/Propo'>Propo mode</a>] [<a href='/List'>IP List</a>]</p>\
-<form name='inputform' action='/Setting' method='POST'>\
-<H2>Range</H2>\
-";
-  for (i = 0; i < ServoCH; i++) {
-    content += "Servo" + String(i) + ":<div id='S" + String(i) + "'>(0-180)</div><br>";
-    content += "0<input type='range' name='Rng_mn" + String(i) + "' value='" + String(Range[i][0]) + "'   min='0'  max='90'  step='1' onChange='update()'>90";
-    content += "<input type='range' name='Rng_mx" + String(i) + "' value='" + String(Range[i][1]) + "' min='90' max='180' step='1' onChange='update()'>180<br>";
-  }
-  content += "<H2>Reverse</H2>";
-  for (i = 0; i < ServoCH; i++) {
-    content += "Servo" + String(i) + ":<input type='checkbox' name='Rvs" + String(i) + "' value='1'";
-    if (Reverse[i]) content += " checked='checked'";
-    content += "><br>";
-  }
-  content += "\
-<H2>WiFi Setting</H2>\
-SSID:<input type='text' name='ssid' value='"+String(myssid)+"' maxlength='32'><br>\
-PASS:<input type='text' name='pass' value='"+String(mypass)+"' maxlength='63'><br>\
-<br><input type='submit' name='SUBMIT' value='Submit'>\
-</form>\
-</body>\
-</html>\
-";
-  server.send(200, "text/html", content);
+  if (Bcast) html.replace("name='Bcast'","name='Bcast' checked='checked'");
+  html.replace("name='ssid'","name='ssid' value='"+String(myssid)+"'");
+  html.replace("name='pass'","name='pass' value='"+String(mypass)+"'");
+
+  server.send(200, "text/html", html);
+
   //EEPROM書き込み
   if (flg) {
     unsigned char data[EEPROM_NUM];
@@ -315,133 +286,133 @@ void handleCtrl() {
 // -----------------------------------
 // Set Synchronization
 //------------------------------------
-void handleSetSync() {
-  int i, j;
-  String ch_str, IP_str;
-
-  Serial.println("SetSyncPage");
-
-  IPAddress t_IPs[IP_Max];
-
-  for (i = 0; i < IP_Num; i++) {
-    IP_sync[i] = false;
-  }
-
-  for (i = 0; i < IP_Max; i++) {
-    ch_str = "IP" + String(i);
-    if (server.hasArg(ch_str)) {
-      IP_str = server.arg(ch_str);
-      Serial.println("Synchronize:" + IP_str + "(" + ch_str + ")");
-      for (j = 0; j < IP_Num; j++) {
-        if (IP_List[j].toString() == IP_str) {
-          IP_sync[j] = true;
-          break;
-        }
-      }
-    }
-  }
-
-  String content = "<!DOCTYPE html><html><head></head><body></body></html>";
-  server.send(200, "text/html", content);
-}
-
+//void handleSetSync() {
+//  int i, j;
+//  String ch_str, IP_str;
+//
+//  Serial.println("SetSyncPage");
+//
+//  IPAddress t_IPs[IP_Max];
+//
+//  for (i = 0; i < IP_Num; i++) {
+//    IP_sync[i] = false;
+//  }
+//
+//  for (i = 0; i < IP_Max; i++) {
+//    ch_str = "IP" + String(i);
+//    if (server.hasArg(ch_str)) {
+//      IP_str = server.arg(ch_str);
+//      Serial.println("Synchronize:" + IP_str + "(" + ch_str + ")");
+//      for (j = 0; j < IP_Num; j++) {
+//        if (IP_List[j].toString() == IP_str) {
+//          IP_sync[j] = true;
+//          break;
+//        }
+//      }
+//    }
+//  }
+//
+//  String content = "<!DOCTYPE html><html><head></head><body></body></html>";
+//  server.send(200, "text/html", content);
+//}
+//
 // -----------------------------------
 // Register
 //------------------------------------
-void handleHello() {
-  IPAddress t_IP = server.client().remoteIP();
-  server.send(200, "text/plain", "Hello");
-
-  if (HostMode) {
-    if(t_IP==IPAddress(0,0,0,0)) return;
-    int flg = 1;
-    Serial.println("Welcome," + t_IP.toString());
-    for (int i = 0; i < IP_Num; i++)
-    {
-      if (t_IP == IP_List[i]) {
-        flg = 0;
-        break;
-      }
-    }
-    if (flg) {
-      if (IP_Num >= IP_Max) {
-        Serial.println("IP Full. Cannot Register:" + t_IP.toString());
-      } else {
-        IP_List[IP_Num] = t_IP;
-        IP_Num++;
-        Serial.println("Register:" + t_IP.toString());
-      }
-    }
-  }
-}
-
+//void handleHello() {
+//  IPAddress t_IP = server.client().remoteIP();
+//  server.send(200, "text/plain", "Hello");
+//
+//  if (HostMode) {
+//    if(t_IP==IPAddress(0,0,0,0)) return;
+//    int flg = 1;
+//    Serial.println("Welcome," + t_IP.toString());
+//    for (int i = 0; i < IP_Num; i++)
+//    {
+//      if (t_IP == IP_List[i]) {
+//        flg = 0;
+//        break;
+//      }
+//    }
+//    if (flg) {
+//      if (IP_Num >= IP_Max) {
+//        Serial.println("IP Full. Cannot Register:" + t_IP.toString());
+//      } else {
+//        IP_List[IP_Num] = t_IP;
+//        IP_Num++;
+//        Serial.println("Register:" + t_IP.toString());
+//      }
+//    }
+//  }
+//}
+//
 
 
 
 // *****************************************************************************************
 // * その他の処理
 // *****************************************************************************************
-bool say_hello(IPAddress IP) {
-  bool flg = false;
-  
-  HTTPClient http;
-  http.begin("http://" + IP.toString() + "/Hello");
-  Serial.println("http://" + IP.toString() + "/Hello");
-  
-  int httpCode = http.GET();
-  if (httpCode > 0) {
-    Serial.print("[HTTP] GET... code: ");
-    Serial.println(httpCode);
-    if (httpCode == HTTP_CODE_OK) {
-      String payload = http.getString();
-      Serial.println(payload);
-    }
-    flg = true;
-  } else {
-    Serial.print("[HTTP] GET... failed, error:");
-    Serial.println(http.errorToString(httpCode).c_str());
-    flg = false;
-  }
-  http.end();
-  return (flg);
-}
+//bool say_hello(IPAddress IP) {
+//  bool flg = false;
+//  
+//  HTTPClient http;
+//  http.begin("http://" + IP.toString() + "/Hello");
+//  Serial.println("http://" + IP.toString() + "/Hello");
+//  
+//  int httpCode = http.GET();
+//  if (httpCode > 0) {
+//    Serial.print("[HTTP] GET... code: ");
+//    Serial.println(httpCode);
+//    if (httpCode == HTTP_CODE_OK) {
+//      String payload = http.getString();
+//      Serial.println(payload);
+//    }
+//    flg = true;
+//  } else {
+//    Serial.print("[HTTP] GET... failed, error:");
+//    Serial.println(http.errorToString(httpCode).c_str());
+//    flg = false;
+//  }
+//  http.end();
+//  return (flg);
+//}
 //-------------------------------------------------------
-void search_host(void){
-  if(HostMode) return;
-  if(flg_find_host) return;
-  
-    int i,n;
-
-    n = MDNS.queryService("esp", "tcp"); // Send out query for esp tcp services
-    Serial.println("mDNS query done");
-    if (n == 0) {
-      Serial.println("no services found");
-      return;
-    }
-  
-    IPAddress t_IP_List[n];
-    bool t_IP_sync[n];
-  
-    Serial.print(n);
-    Serial.println(" service(s) found");
-    for (int i = 0; i < n; ++i) {
-        // Print details for each service found
-        Serial.print(i + 1);
-        Serial.print(": ");
-        Serial.print(MDNS.hostname(i));
-        Serial.print(" (");
-        Serial.print(MDNS.IP(i));
-        Serial.print(":");
-        Serial.print(MDNS.port(i));
-        Serial.println(")");
-        if(MDNS.hostname(i) == HOST_NAME){
-          flg_find_host = true;
-          Serial.print("Find HOST:");
-          Serial.println(MDNS.IP(i));
-          HOST_IP = MDNS.IP(i);
-        }
-    }
-}
+//void search_host(void){
+//  if(HostMode) return;
+//  if(flg_find_host) return;
+//  
+//    int i,n;
+//
+//    n = MDNS.queryService("esp", "tcp"); // Send out query for esp tcp services
+//    Serial.println("mDNS query done");
+//    if (n == 0) {
+//      Serial.println("no services found");
+//      return;
+//    }
+//  
+//    IPAddress t_IP_List[n];
+//    bool t_IP_sync[n];
+//  
+//    Serial.print(n);
+//    Serial.println(" service(s) found");
+//    for (int i = 0; i < n; ++i) {
+//        // Print details for each service found
+//        Serial.print(i + 1);
+//        Serial.print(": ");
+//        Serial.print(MDNS.hostname(i));
+//        Serial.print(" (");
+//        Serial.print(MDNS.IP(i));
+//        Serial.print(":");
+//        Serial.print(MDNS.port(i));
+//        Serial.println(")");
+//        if(MDNS.hostname(i) == HOST_NAME){
+//          flg_find_host = true;
+//          Serial.print("Find HOST:");
+//          Serial.println(MDNS.IP(i));
+//          HOST_IP = MDNS.IP(i);
+//        }
+//    }
+//}
 //------------------------------
 // Control関数
 //------------------------------
@@ -474,26 +445,27 @@ void servo_ctrl(void) {
     if(!IP_sync[i]) flg_all = false;
   }
 
-  if(flg_all){
+//  if(flg_all){
+  if(Bcast){
   IPAddress Broadcast;
   Broadcast = WiFi.localIP();
   Broadcast[3] = 255;
   udp.beginPacket(Broadcast, UDP_PORT);
   udp.write((char*)&pkt, sizeof(pkt));
   udp.endPacket();
-  Serial.print("udp:");
-  Serial.println(Broadcast);
-  }else{
-  for (i = 0; i < IP_Num; i++) {
-    if (IP_sync[i]) {
-      if (udp.beginPacket(IP_List[i], UDP_PORT)) {
-        udp.write((char*)&pkt, sizeof(pkt));
-        udp.endPacket();
-        Serial.print("udp:");
-        Serial.println(IP_List[i]);
-      }
-    }
-  }
+//  Serial.print("udp:");
+//  Serial.println(Broadcast);
+//  }else{
+//  for (i = 0; i < IP_Num; i++) {
+//    if (IP_sync[i]) {
+//      if (udp.beginPacket(IP_List[i], UDP_PORT)) {
+//        udp.write((char*)&pkt, sizeof(pkt));
+//        udp.endPacket();
+//        Serial.print("udp:");
+//        Serial.println(IP_List[i]);
+//      }
+//    }
+//  }
   }
 }
 
@@ -563,17 +535,17 @@ void setup_ram(void) {
   {
     servo_val[i] = 90;
   }
-  for (i=0;i<IP_Max;i++){
-    IP_List[i] = IPAddress(0,0,0,0);
-    IP_sync[i] = false;
-  }
+//  for (i=0;i<IP_Max;i++){
+//    IP_List[i] = IPAddress(0,0,0,0);
+//    IP_sync[i] = false;
+//  }
 
   int Host_sw = digitalRead(DipSW2);
   int AP_sw = digitalRead(DipSW1);
 
   //Hostモード選択
-  if (Host_sw) HostMode = true;
-  else HostMode = false;
+//  if (Host_sw) HostMode = true;
+//  else HostMode = false;
 
   //AP選択
   if (AP_sw){
@@ -586,20 +558,21 @@ void setup_ram(void) {
   }
 
   //WiFiモード選択
-  if (AP_sw && Host_sw) WiFiMode = WIFI_AP;
-  else                  WiFiMode = WIFI_STA;
+//  if (AP_sw && Host_sw) WiFiMode = WIFI_AP;
+  if (AP_sw) WiFiMode = WIFI_AP;
+  else       WiFiMode = WIFI_STA;
 
 }
 // ------------------------------------
-void register_ip(void) {
-  if (HostMode) return;
-
-  // サーバーにIPを登録
-  if(flg_find_host){
-    Serial.println("Register IP");
-    say_hello(HOST_IP);
-  }
-}
+//void register_ip(void) {
+//  if (HostMode) return;
+//
+//  // サーバーにIPを登録
+//  if(flg_find_host){
+//    Serial.println("Register IP");
+//    say_hello(HOST_IP);
+//  }
+//}
 
 // ------------------------------------
 void setup_mDNS(void) {
@@ -620,7 +593,7 @@ void setup_mDNS(void) {
   Serial.println("mDNS responder started");
   if(HostMode){
     MDNS.addService("http", "tcp", 80);
-    MDNS.addService("esp", "tcp", 8080); // Announce esp tcp service on port 8080
+//    MDNS.addService("esp", "tcp", 8080); // Announce esp tcp service on port 8080
   }
 }
 // ------------------------------------
@@ -631,11 +604,11 @@ void setup_spiffs(void){
 void setup_http(void) {
   server.on("/", handleMyPage);
   server.on("/Propo", handlePropo);
-  server.on("/List", handleList);
+//  server.on("/List", handleList);
   server.on("/Setting", handleSetting);
-  server.on("/Hello", handleHello);
+//  server.on("/Hello", handleHello);
   server.on("/Ctrl", handleCtrl);
-  server.on("/SetSync", handleSetSync);
+//  server.on("/SetSync", handleSetSync);
 
   server.onNotFound(handleNotFound);
   server.begin();
@@ -680,13 +653,12 @@ void setup_eeprom(void) {
 }
 // ------------------------------------
 void setup(void) {
-
   setup_io();
   setup_ram();
   setup_eeprom();
   setup_com();
   setup_mDNS();
-  register_ip();
+//  register_ip();
   setup_spiffs();
   setup_http();
   setup_udp();
@@ -763,8 +735,8 @@ void timer(void){
     if(HostMode){
       MDNS.update();
     }else{
-      search_host();
-      register_ip();
+//      search_host();
+//      register_ip();
     }
   }
 }
