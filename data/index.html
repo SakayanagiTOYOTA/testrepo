@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+ <html>
+  <head>
+   <meta charset='UTF-8'>
+   <meta name='viewport' content='width=device-width, user-scalable=no'>
+   <title>Servo Control</title>
+   <style type='text/css'>
+    input{width:100%;height:20pt;}
+   </style>
+   <script type='text/javascript'>
+    function formsubmit(){
+     document.inputform.submit();
+     }
+  </script>
+  </head>
+  <body>
+  <H1>
+  Servo Controler
+  </H1>
+  <p>[<a href='/Propo'>Propo mode</a>] [<a href='/List'>IP List</a>] [<a href='/Setting'>Setting</a>]</p>
+  <form name='inputform' action='/Ctrl' method='POST' target='iframe'>
+   Servo0:<br><input type='range' name='SERVO0' value='" + String(servo_val[0]) + "' min='0' max='180' step='1' onChange='formsubmit()'><br>
+   Servo1:<br><input type='range' name='SERVO1' value='" + String(servo_val[1]) + "' min='0' max='180' step='1' onChange='formsubmit()'><br>
+   Servo2:<br><input type='range' name='SERVO2' value='" + String(servo_val[2]) + "' min='0' max='180' step='1' onChange='formsubmit()'><br>
+   Servo3:<br><input type='range' name='SERVO3' value='" + String(servo_val[3]) + "' min='0' max='180' step='1' onChange='formsubmit()'><br>
+          <br><input type='submit' name='SUBMIT' value='Submit'>
+  </form>
+  <iframe name='iframe' style='display:none'></iframe>
+  </body>
+</html>

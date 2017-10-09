@@ -1,0 +1,170 @@
+<!DOCTYPE html><html><head>
+ <title>Propo</title>
+ <meta name='viewport' content='width=device-width, user-scalable=no'>
+ <meta name='apple-mobile-web-app-capable' content='yes'>
+ <meta name='apple-mobile-web-app-status-bar-style' content='black'>
+ <style type='text/css'>
+  body { height:100%; width:100%; margin: 0px; overflow: hidden; }
+  canvas { border: none;}
+  body #wrapper{ width:100%; height:100%; min-height:100%;  overflow: hidden;  position: fixed; }
+ </style>
+<script type='text/javascript'>
+var canvas, ctx, wrapper;
+var w = 0,h = 0;
+var timer,timer2;
+var flg_submit;
+var lx,ly,rx,ry,sw;
+var s_array = [90,90,90,90];
+var s_array_o = [90,90,90,90];
+
+var updateStarted = false;
+var submitStarted = false;
+var touches = [];
+
+function update() {
+ if (updateStarted) return;
+  updateStarted = true;
+
+  var nw = wrapper.offsetWidth;
+  var nh = wrapper.offsetHeight;
+
+  if ((w != nw) || (h != nh)) {
+    w = nw;
+    h = nh;
+
+    canvas.width=w;
+    canvas.height=h;
+    if(h>w){
+      lx= w/2;rx=w/2;
+      if(h/4>w/2){
+        ly=w/2;ry=h-w/2; sw=w/2*0.7;
+      }else{
+        ly=h/4;ry=h-h/4; sw=h/4*0.7;
+      }
+    }else{
+      ly= h/2;ry=h/2;
+      if(w/4>h/2){
+        lx=h/2;rx=w-h/2; sw=h/2*0.7;
+      }else{
+        lx=w/4;rx=w-w/4; sw=w/4*0.7;
+      }
+    }
+  }
+
+  var i,j;
+  var len = touches.length;
+  for (i=0; i<len; i++) {
+    var touch = touches[i];
+    var px = touch.pageX;
+    var py = touch.pageY;
+
+    if(Math.abs(px-lx)<sw && Math.abs(py-ly)<sw){
+      s_array[0]= PosToServo(px,lx,sw*2);
+      s_array[1]= PosToServo(py,ly,sw*2);
+    }else if(Math.abs(px-rx)<sw && Math.abs(py-ry)<sw){
+      s_array[2]= PosToServo(px,rx,sw*2);
+      s_array[3]= PosToServo(py,ry,sw*2);
+    }else if(px<sw*0.2 && py<sw*0.2){
+      window.location.href = '/'; 
+    }
+    for (j=0;j<4;j++){
+      if (s_array[j]!=s_array_o[j]){
+        flg_submit = true;
+        s_array_o[j] = s_array[j];
+      }
+    }
+  }
+  make_graphic();
+  updateStarted = false;
+}
+
+function make_graphic(){
+  ctx.clearRect(0, 0, w, h);
+  ctx.lineWidth = 2.0;
+  ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
+
+  ctx.beginPath();
+  ctx.arc(lx,ly,sw,0,2*Math.PI,true);
+  ctx.rect(lx-sw,ly-sw,sw*2,sw*2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(rx,ry,sw,0,2*Math.PI, true);
+  ctx.rect(rx-sw,ry-sw,sw*2,sw*2);
+  ctx.stroke();
+  
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.beginPath();
+  ctx.arc(ServoToPos(s_array[0],lx,sw*2), ServoToPos(s_array[1],ly,sw*2), sw*0.2, 0, 2*Math.PI, true);
+  ctx.fill();
+  ctx.stroke();
+  
+  ctx.beginPath();
+  ctx.arc(ServoToPos(s_array[2],rx,sw*2), ServoToPos(s_array[3],ry,sw*2), sw*0.2, 0, 2*Math.PI, true);
+  ctx.fill();
+  ctx.stroke();
+  
+  ctx.beginPath();
+  ctx.rect(0,0,sw*0.2,sw*0.2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0,sw*0.1);
+  ctx.lineTo(sw*0.2,0);
+  ctx.lineTo(sw*0.2,sw*0.2);
+  ctx.lineTo(0,sw*0.1);
+  ctx.fillStyle = 'rgba(0, 100, 0, 0.5)';
+  ctx.fill();
+  ctx.stroke();
+}
+
+function PosToServo( pos, center,width ){
+  var res;
+  res = ((pos - center)/width+0.5)*180;
+  res = Math.max(res,0);
+  res = Math.min(res,180);
+  return Math.round(res);
+}
+
+function ServoToPos( servo, center,width ){
+  var res;
+  res = Math.max(servo,0);
+  res = Math.min(servo,180);
+  res = center + (servo -90)*width/180;
+  return Math.round(res);
+}
+
+function submitServo(){
+ if (submitStarted) return;
+ if (!flg_submit) return;
+  submitStarted = true;
+  for(var i=0;i<s_array.length;i++){
+    document.inputform.elements['SERVO'+i].value = s_array[i];
+  }
+  document.inputform.submit();
+  submitStarted = false;
+  flg_submit = false;
+}
+
+function ol() {
+  canvas = document.getElementById('canvas');
+  wrapper = document.getElementById('wrapper');
+  ctx = canvas.getContext('2d');
+  canvas.addEventListener('touchmove', function(event) { event.preventDefault(); touches = event.touches;});
+  timer  = setInterval(update, 15);
+  timre2 = setInterval(submitServo,32);
+}
+</script>
+</head>
+<body onload='ol()'>
+<div id='wrapper'>
+<canvas id='canvas'></canvas>
+</div>
+  <form name='inputform' action='/Ctrl' method='POST' target='iframe'>
+   <input type='hidden' name='SERVO0' >
+   <input type='hidden' name='SERVO1' >
+   <input type='hidden' name='SERVO2' >
+   <input type='hidden' name='SERVO3' >
+  </form>
+<iframe name='iframe' style='display:none'></iframe>
+</body>
+</html>
