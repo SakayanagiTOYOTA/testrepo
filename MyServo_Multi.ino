@@ -1,7 +1,6 @@
- 
 // ****************************************************************
 // MyServoControler
-//  Ver0.00 2017.8.18
+//  Ver0.01 2017.10.9
 //  copyright 坂柳
 //  Hardware構成
 //  マイコン：wroom-02
@@ -13,26 +12,22 @@
 
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
-#include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <Servo.h>
 #include <WiFiUdp.h>
-#include <ESP8266HTTPClient.h>
-#include <math.h>
 #include <EEPROM.h>
 #include <FS.h>
 //*******************************************************************************
 //* 定数、変数
 //*******************************************************************************
-// SSID
-const char* ssid;
-const char* ssid1 = "SERVO_AP";
-const char* password;
-const char* password1 = "";
+// ホスト名
+String HostName;
 
 // Timer
-unsigned long time_old =0;
-#define TimerInterval (unsigned long)(10*1000)
+unsigned long time_old10s =0;
+unsigned long time_old32ms =0;
+#define Timer10s  (unsigned long)(10*1000)
+#define Timer32ms (unsigned long)(32)
 
 //サーボ関連
 #define ServoCH 4
@@ -42,21 +37,15 @@ int servo_val[ServoCH];          //サーボ指令値
 //サーバー
 ESP8266WebServer server(80);  //webサーバー
 WiFiUDP udp;                     //udpサーバー
+WiFiUDP udp_multi;               //udpサーバー
 #define UDP_PORT 10000
-#define HOST_NAME "servo_host"
-IPAddress HOST_IP = IPAddress(192, 168, 0, 10);
-IPAddress SUB_MASK = IPAddress(255, 255, 255, 0);
-bool flg_find_host=false;
-
-//接続しているほかのESPのIPのリスト
-#define IP_Max 20
-unsigned char IP_Num = 0;
-IPAddress IP_List[IP_Max];
-bool IP_sync[IP_Max];
-
+//#define UDP_PORT_B 90000
+IPAddress HOST_IP(192, 168, 0, 10);
+IPAddress SUB_MASK(255, 255, 255, 0);
+IPAddress MULTI_IP(239,192,1,2);
+#define MULTI_PORT 90000
 // AP or ST
 WiFiMode_t  WiFiMode;
-bool HostMode;
 
 // 設定
 int Range[4][2];  // 8byte
@@ -107,7 +96,6 @@ typedef struct {
 //*******************************************************************************
 //* プロトタイプ宣言
 //*******************************************************************************
-//bool say_hello(IPAddress IP);
 void servo_ctrl(void);
 
 //*******************************************************************************
@@ -121,6 +109,7 @@ void handleMyPage() {
   File fd = SPIFFS.open("/index.html","r");
   String html = fd.readString();
   fd.close();
+  html.replace("<a href='/Propo'>","<a href='http://"+HOST_IP.toString()+"/Propo'>");
   server.send(200, "text/html", html);
 }
 // -----------------------------------
@@ -131,56 +120,8 @@ void handlePropo() {
   File fd = SPIFFS.open("/Propo.html","r");
   String html = fd.readString();
   fd.close();
-
   server.send(200, "text/html", html);
 }
-// -----------------------------------
-// IP List
-//------------------------------------
-//void handleList() {
-//  String content;
-//  Serial.println("IP List");
-//  
-//  content = "\
-//<!DOCTYPE html><html><head>\
-// <meta charset='UTF-8'><meta name='viewport' content='width=device-width, user-scalable=no'>\
-// <title>IP List</title>\
-//<style type='text/css'>\
-//input[type=checkbox]{height:20pt;width:20pt}\
-//input[type=submit]{height:20pt;width:100%}\
-//</style></head>\
-//<body>\
-//<H1>IP List</H1>\
-//<p>[<a href='/'>main</a>] [<a href='/Setting'>Setting</a>]</p>\
-//HOST:<a href='http://" + HOST_IP.toString() + "'>" + HOST_IP.toString() + "</a><br>\
-//Local IP:<a href='http://" + WiFi.localIP().toString() + "'>" + WiFi.localIP().toString() + "</a><br>\
-//";
-//  if(HostMode){
-//    content += "<form name='inputform' action='/SetSync' method='POST' target='iframe'>";
-//    for (int i = 0; i < IP_Num; i++) {
-//      content += "<input type='checkbox' name='IP" + String(i) + "' value='" + IP_List[i].toString() + "'";
-//      if (IP_sync[i]) content += " checked='checked'";
-//      content += ">";
-//      content += "<a href='http://";
-//      content += IP_List[i].toString();
-//      content += "'>";
-//      content += IP_List[i].toString();
-//      content += "</a><br>";
-//    }
-//    content += "\
-//<br><input type='submit' name='SUBMIT' value='Submit'>\
-//</form>\
-//<p>接続しているコントローラーの一覧です。チェックを付けたコントローラーは連動します。</p>\
-//<iframe name='iframe' style='display:none'></iframe>\
-//";
-//  }
-//  content +="\
-//</body>\
-//</html>\
-//";
-//  server.send(200, "text/html", content);
-//}
-
 // -----------------------------------
 // Setting
 //------------------------------------
@@ -192,9 +133,7 @@ void handleSetting() {
   // 設定反映
   if (server.hasArg("SUBMIT")) {
     flg = true;
-    for (i = 0; i < ServoCH; i++) {
-      Reverse[i] = false;
-    }
+    for (i = 0; i < ServoCH; i++) {Reverse[i] = false;}
     Bcast = false;
   }
   for (i = 0; i < ServoCH; i++) {
@@ -218,7 +157,7 @@ void handleSetting() {
   if (Bcast) html.replace("name='Bcast'","name='Bcast' checked='checked'");
   html.replace("name='ssid'","name='ssid' value='"+String(myssid)+"'");
   html.replace("name='pass'","name='pass' value='"+String(mypass)+"'");
-
+  html.replace("<a href='/Propo'>","<a href='http://"+HOST_IP.toString()+"/Propo'>");
   server.send(200, "text/html", html);
 
   //EEPROM書き込み
@@ -226,20 +165,12 @@ void handleSetting() {
     unsigned char data[EEPROM_NUM];
     data[8] = 0;
     for (i = 0; i < ServoCH; i++) {
-      for (j = 0; j < 2; j++) {
-        data[i * 2 + j] = Range[i][j];
-      }
-      if (Reverse[i])data[8] += (1 << i);
+      for (j = 0; j < 2; j++) {data[i * 2 + j] = Range[i][j];}
+      if (Reverse[i]) data[8] += (1 << i);
     }
-    for (i=0;i<sizeof(myssid); i++) {
-      data[9+i] = myssid[i];
-    }
-    for (i=0;i<sizeof(mypass); i++) {
-      data[42+i] = mypass[i];
-    }
-    for (i = 0; i < EEPROM_NUM; i++) {
-      EEPROM.write(i, data[i]);
-    }
+    for (i=0;i<sizeof(myssid); i++)  {data[9+i]  = myssid[i];}
+    for (i=0;i<sizeof(mypass); i++)  {data[42+i] = mypass[i];}
+    for (i = 0; i < EEPROM_NUM; i++) {EEPROM.write(i, data[i]);}
     EEPROM.commit();
   }
 }
@@ -283,136 +214,6 @@ void handleCtrl() {
   server.send(200, "text/plain", "Ctrl");
   ctrl_exec = true;
 }
-// -----------------------------------
-// Set Synchronization
-//------------------------------------
-//void handleSetSync() {
-//  int i, j;
-//  String ch_str, IP_str;
-//
-//  Serial.println("SetSyncPage");
-//
-//  IPAddress t_IPs[IP_Max];
-//
-//  for (i = 0; i < IP_Num; i++) {
-//    IP_sync[i] = false;
-//  }
-//
-//  for (i = 0; i < IP_Max; i++) {
-//    ch_str = "IP" + String(i);
-//    if (server.hasArg(ch_str)) {
-//      IP_str = server.arg(ch_str);
-//      Serial.println("Synchronize:" + IP_str + "(" + ch_str + ")");
-//      for (j = 0; j < IP_Num; j++) {
-//        if (IP_List[j].toString() == IP_str) {
-//          IP_sync[j] = true;
-//          break;
-//        }
-//      }
-//    }
-//  }
-//
-//  String content = "<!DOCTYPE html><html><head></head><body></body></html>";
-//  server.send(200, "text/html", content);
-//}
-//
-// -----------------------------------
-// Register
-//------------------------------------
-//void handleHello() {
-//  IPAddress t_IP = server.client().remoteIP();
-//  server.send(200, "text/plain", "Hello");
-//
-//  if (HostMode) {
-//    if(t_IP==IPAddress(0,0,0,0)) return;
-//    int flg = 1;
-//    Serial.println("Welcome," + t_IP.toString());
-//    for (int i = 0; i < IP_Num; i++)
-//    {
-//      if (t_IP == IP_List[i]) {
-//        flg = 0;
-//        break;
-//      }
-//    }
-//    if (flg) {
-//      if (IP_Num >= IP_Max) {
-//        Serial.println("IP Full. Cannot Register:" + t_IP.toString());
-//      } else {
-//        IP_List[IP_Num] = t_IP;
-//        IP_Num++;
-//        Serial.println("Register:" + t_IP.toString());
-//      }
-//    }
-//  }
-//}
-//
-
-
-
-// *****************************************************************************************
-// * その他の処理
-// *****************************************************************************************
-//bool say_hello(IPAddress IP) {
-//  bool flg = false;
-//  
-//  HTTPClient http;
-//  http.begin("http://" + IP.toString() + "/Hello");
-//  Serial.println("http://" + IP.toString() + "/Hello");
-//  
-//  int httpCode = http.GET();
-//  if (httpCode > 0) {
-//    Serial.print("[HTTP] GET... code: ");
-//    Serial.println(httpCode);
-//    if (httpCode == HTTP_CODE_OK) {
-//      String payload = http.getString();
-//      Serial.println(payload);
-//    }
-//    flg = true;
-//  } else {
-//    Serial.print("[HTTP] GET... failed, error:");
-//    Serial.println(http.errorToString(httpCode).c_str());
-//    flg = false;
-//  }
-//  http.end();
-//  return (flg);
-//}
-//-------------------------------------------------------
-//void search_host(void){
-//  if(HostMode) return;
-//  if(flg_find_host) return;
-//  
-//    int i,n;
-//
-//    n = MDNS.queryService("esp", "tcp"); // Send out query for esp tcp services
-//    Serial.println("mDNS query done");
-//    if (n == 0) {
-//      Serial.println("no services found");
-//      return;
-//    }
-//  
-//    IPAddress t_IP_List[n];
-//    bool t_IP_sync[n];
-//  
-//    Serial.print(n);
-//    Serial.println(" service(s) found");
-//    for (int i = 0; i < n; ++i) {
-//        // Print details for each service found
-//        Serial.print(i + 1);
-//        Serial.print(": ");
-//        Serial.print(MDNS.hostname(i));
-//        Serial.print(" (");
-//        Serial.print(MDNS.IP(i));
-//        Serial.print(":");
-//        Serial.print(MDNS.port(i));
-//        Serial.println(")");
-//        if(MDNS.hostname(i) == HOST_NAME){
-//          flg_find_host = true;
-//          Serial.print("Find HOST:");
-//          Serial.println(MDNS.IP(i));
-//          HOST_IP = MDNS.IP(i);
-//        }
-//    }
-//}
 //------------------------------
 // Control関数
 //------------------------------
@@ -420,6 +221,8 @@ void servo_ctrl(void) {
   if(!ctrl_exec) return;
   ctrl_exec = false;
 
+  //同期
+  sync();
   //Range変換
   int i, val[ServoCH];
   for (i = 0; i < ServoCH; i++) {
@@ -430,43 +233,6 @@ void servo_ctrl(void) {
     myservo[i].write(val[i]);
   }
 
-  //同期
-  st_udp_pkt pkt;
-  pkt.l_ver = ((unsigned long)servo_val[0] * 255) / 180;
-  pkt.l_hzn = ((unsigned long)servo_val[1] * 255) / 180;
-  pkt.r_ver = ((unsigned long)servo_val[2] * 255) / 180;
-  pkt.r_hzn = ((unsigned long)servo_val[3] * 255) / 180;
-  pkt.l_flg = 1;
-  pkt.r_flg = 1;
-
-  bool flg_all=true;
-
-  for (i = 0; i < IP_Num; i++) {
-    if(!IP_sync[i]) flg_all = false;
-  }
-
-//  if(flg_all){
-  if(Bcast){
-  IPAddress Broadcast;
-  Broadcast = WiFi.localIP();
-  Broadcast[3] = 255;
-  udp.beginPacket(Broadcast, UDP_PORT);
-  udp.write((char*)&pkt, sizeof(pkt));
-  udp.endPacket();
-//  Serial.print("udp:");
-//  Serial.println(Broadcast);
-//  }else{
-//  for (i = 0; i < IP_Num; i++) {
-//    if (IP_sync[i]) {
-//      if (udp.beginPacket(IP_List[i], UDP_PORT)) {
-//        udp.write((char*)&pkt, sizeof(pkt));
-//        udp.endPacket();
-//        Serial.print("udp:");
-//        Serial.println(IP_List[i]);
-//      }
-//    }
-//  }
-  }
 }
 
 // *****************************************************************************************
@@ -477,6 +243,8 @@ void servo_ctrl(void) {
 //------------------------------
 void setup_udp(void) {
   udp.begin(UDP_PORT);
+  udp_multi.beginMulticast(HOST_IP,MULTI_IP,MULTI_PORT);   
+//  begin(UDP_PORT_B);
 }
 //------------------------------
 // IO初期化
@@ -485,8 +253,8 @@ void setup_io(void) {
   //init servo
   myservo[0].attach(ServoCH1);   // attaches the servo on GIO4 to the servo object
   myservo[1].attach(ServoCH2);   // attaches the servo on GIO5 to the servo object
-  myservo[2].attach(ServoCH3);  // attaches the servo on GI12 to the servo object
-  myservo[3].attach(ServoCH4);  // attaches the servo on GI13 to the servo object
+  myservo[2].attach(ServoCH3);   // attaches the servo on GI12 to the servo object
+  myservo[3].attach(ServoCH4);   // attaches the servo on GI13 to the servo object
   //init port
   pinMode(DipSW1, INPUT);
   pinMode(DipSW2, INPUT);
@@ -500,101 +268,47 @@ void setup_com(void) {      //通信初期化
   if (WiFiMode == WIFI_AP) {
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(HOST_IP, HOST_IP, SUB_MASK);
-    WiFi.softAP(ssid, password);
-      Serial.print(".");
-      Serial.println("");
-      Serial.print("Starting ");
-      Serial.println(ssid);
-      Serial.print("IP address: ");
-      Serial.println(WiFi.localIP());
+    WiFi.softAP(HostName.c_str());
+    Serial.print("Starting ");
+    Serial.println(HostName);
   } else {
     WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-
+    WiFi.begin(myssid, mypass);
     // Wait for connection
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
-      Serial.print(".");
-      Serial.println("");
       Serial.print("Connected to ");
-      Serial.println(ssid);
+      Serial.println(myssid);
       Serial.print("IP address: ");
       Serial.println(WiFi.localIP());
     }
-    if(HostMode)
-    {
-      HOST_IP = WiFi.localIP();
-    }
+    HOST_IP = WiFi.localIP();
   }
+  Serial.print("IP address: ");
+  Serial.println(HOST_IP);
 }
 // ------------------------------------
 void setup_ram(void) {
   //サーボ初期値
   int i;
-  for (i = 0; i < ServoCH; i++)
-  {
-    servo_val[i] = 90;
-  }
-//  for (i=0;i<IP_Max;i++){
-//    IP_List[i] = IPAddress(0,0,0,0);
-//    IP_sync[i] = false;
-//  }
+  for (i = 0; i < ServoCH; i++) {servo_val[i] = 90;}
 
-  int Host_sw = digitalRead(DipSW2);
   int AP_sw = digitalRead(DipSW1);
-
-  //Hostモード選択
-//  if (Host_sw) HostMode = true;
-//  else HostMode = false;
-
-  //AP選択
-  if (AP_sw){
-    ssid = ssid1;
-    password = password1;
-  }
-  else{
-    ssid = myssid;
-    password = mypass;
-  }
-
   //WiFiモード選択
-//  if (AP_sw && Host_sw) WiFiMode = WIFI_AP;
   if (AP_sw) WiFiMode = WIFI_AP;
   else       WiFiMode = WIFI_STA;
 
+  HostName = "ESP_"+String(ESP.getChipId(),HEX);
+
 }
 // ------------------------------------
-//void register_ip(void) {
-//  if (HostMode) return;
-//
-//  // サーバーにIPを登録
-//  if(flg_find_host){
-//    Serial.println("Register IP");
-//    say_hello(HOST_IP);
-//  }
-//}
-
-// ------------------------------------
 void setup_mDNS(void) {
-
-  String hostname;
-  if(HostMode){
-    hostname = HOST_NAME;
-  }else{
-    hostname = "ESP_"+String(ESP.getChipId(),HEX);
-  }
-
-  Serial.print("Hostname: ");
-  Serial.println(hostname);
-  WiFi.hostname(hostname);
-  if (!MDNS.begin(hostname.c_str(),WiFi.localIP())) {
+  WiFi.hostname(HostName);
+  if (!MDNS.begin(HostName.c_str(),WiFi.localIP())) {
     Serial.println("Error setting up MDNS responder!");
   }
   Serial.println("mDNS responder started");
-  if(HostMode){
-    MDNS.addService("http", "tcp", 80);
-//    MDNS.addService("esp", "tcp", 8080); // Announce esp tcp service on port 8080
-  }
+  MDNS.addService("http", "tcp", 80);
 }
 // ------------------------------------
 void setup_spiffs(void){
@@ -604,11 +318,8 @@ void setup_spiffs(void){
 void setup_http(void) {
   server.on("/", handleMyPage);
   server.on("/Propo", handlePropo);
-//  server.on("/List", handleList);
   server.on("/Setting", handleSetting);
-//  server.on("/Hello", handleHello);
   server.on("/Ctrl", handleCtrl);
-//  server.on("/SetSync", handleSetSync);
 
   server.onNotFound(handleNotFound);
   server.begin();
@@ -626,39 +337,25 @@ void setup_eeprom(void) {
   EEPROM.begin(EEPROM_NUM);
   unsigned char data[EEPROM_NUM];
   int i, j;
-  for (i = 0; i < EEPROM_NUM; i++) {
-    data[i] = EEPROM.read(i);
-  }
+  for (i = 0; i < EEPROM_NUM; i++) {data[i] = EEPROM.read(i);}
   for (i = 0; i < ServoCH; i++) {
-    for (j = 0; j < 2; j++) {
-      Range[i][j] = data[i * 2 + j];
-    }
+    for (j = 0; j < 2; j++) {Range[i][j] = data[i * 2 + j];}
     if (Range[i][0] > 90) Range[i][0] = 0;
     if (Range[i][1] < 90 || Range[i][1] > 180) Range[i][1] = 180;
     Reverse[i] = (data[8] & (1 << i)) >> i;
   }
-  for (i=0;i<sizeof(myssid);i++)
-  {
-    myssid[i] = data[9+i];
-  }
-  if (strlen(myssid)==0)
-  {
-    strcpy(myssid,"SERVO_AP2");
-  }
-  for (i=0;i<sizeof(mypass);i++)
-  {
-    mypass[i] = data[42+i];
-  }
+  for (i=0;i<sizeof(myssid);i++){myssid[i] = data[9+i];}
+  if (strlen(myssid)==0){strcpy(myssid,"SERVO_AP2");}
+  for (i=0;i<sizeof(mypass);i++){mypass[i] = data[42+i];}
   
 }
 // ------------------------------------
 void setup(void) {
   setup_io();
-  setup_ram();
   setup_eeprom();
+  setup_ram();
   setup_com();
   setup_mDNS();
-//  register_ip();
   setup_spiffs();
   setup_http();
   setup_udp();
@@ -670,25 +367,25 @@ void setup(void) {
 //------------------------------
 // RCW Controller対応
 //------------------------------
-void udp_loop(void) {
-  int rlen = udp.parsePacket();
+void udp_loop(WiFiUDP t_udp) {
+  int rlen = t_udp.parsePacket();
   if (rlen < 10) return;
   st_udp_pkt pkt;
-  udp.read((char*)(&pkt), 10);
-  Serial.print("BTN:");  Serial.print(pkt.btn[0]);
-  Serial.print(" ");  Serial.print(pkt.btn[1]);
-  Serial.print(" L1:");  Serial.print(pkt.l_hzn);
-  Serial.print(" L2:");  Serial.print(pkt.l_ver);
-  Serial.print(" R1:");  Serial.print(pkt.r_hzn);
-  Serial.print(" R2:");  Serial.print(pkt.r_ver);
-  Serial.print(" accx:"); Serial.print(pkt.acc_x);
-  Serial.print(" accy:"); Serial.print(pkt.acc_y);
-  Serial.print(" accz:"); Serial.print(pkt.acc_z);
-  Serial.print(" rot:"); Serial.print(pkt.rot);
-  Serial.print(" r_flg:"); Serial.print(pkt.r_flg);
-  Serial.print(" l_flg:"); Serial.print(pkt.l_flg);
+  t_udp.read((char*)(&pkt), 10);
+  Serial.print("BTN:");      Serial.print(pkt.btn[0]);
+  Serial.print(" ");         Serial.print(pkt.btn[1]);
+  Serial.print(" L1:");      Serial.print(pkt.l_hzn);
+  Serial.print(" L2:");      Serial.print(pkt.l_ver);
+  Serial.print(" R1:");      Serial.print(pkt.r_hzn);
+  Serial.print(" R2:");      Serial.print(pkt.r_ver);
+  Serial.print(" accx:");    Serial.print(pkt.acc_x);
+  Serial.print(" accy:");    Serial.print(pkt.acc_y);
+  Serial.print(" accz:");    Serial.print(pkt.acc_z);
+  Serial.print(" rot:");     Serial.print(pkt.rot);
+  Serial.print(" r_flg:");   Serial.print(pkt.r_flg);
+  Serial.print(" l_flg:");   Serial.print(pkt.l_flg);
   Serial.print(" acc_flg:"); Serial.print(pkt.acc_flg);
-  Serial.print(" dummy:"); Serial.print(pkt.dummy);
+  Serial.print(" dummy:");   Serial.print(pkt.dummy);
   Serial.print("\n");
 
   if (pkt.l_flg)
@@ -696,7 +393,6 @@ void udp_loop(void) {
     servo_val[0] = (unsigned char)(((unsigned long)pkt.l_ver * 180) >> 8);
     servo_val[1] = (unsigned char)(((unsigned long)pkt.l_hzn * 180) >> 8);
   } else {
-    Serial.print("debug:" + String(pkt.btn[1]) + ":" + String(pkt.btn[1] & 0x03));
     switch (pkt.btn[1] & 0x03) {
       case 0x01: servo_val[1] = 180; break; //UP
       case 0x02: servo_val[1] = 0;   break; //DOWN
@@ -721,29 +417,43 @@ void udp_loop(void) {
       case 0x20: servo_val[3] = 0;    break; //A
       default:   servo_val[3] = 90;   break;
     }
-    if     (pkt.btn[1] & 0x40) servo_val[2] = 180; //B
-    else if (pkt.btn[0] & 0x01) servo_val[2] = 0; //X
-    else                     servo_val[2] = 90;
+    if      (pkt.btn[1] & 0x40) servo_val[2] = 180; //B
+    else if (pkt.btn[0] & 0x01) servo_val[2] = 0;   //X
+    else                        servo_val[2] = 90;
   }
-//  servo_ctrl();
   ctrl_exec=true;
 }
 //----------------------------------------------------------------------
 void timer(void){
-  if((unsigned long)(millis()-time_old)>TimerInterval){
-    time_old = millis();
-    if(HostMode){
-      MDNS.update();
-    }else{
-//      search_host();
-//      register_ip();
-    }
+  if((unsigned long)(millis()-time_old10s)>Timer10s){
+    time_old10s = millis();
+    MDNS.update();
   }
+  if((unsigned long)(millis()-time_old32ms)>128){
+    time_old32ms = millis();
+    sync();
+  }
+}
+void sync(void){
+  if(!Bcast) return;
+    //同期
+  st_udp_pkt pkt;
+  pkt.l_ver = ((unsigned long)servo_val[0] * 255) / 180;
+  pkt.l_hzn = ((unsigned long)servo_val[1] * 255) / 180;
+  pkt.r_ver = ((unsigned long)servo_val[2] * 255) / 180;
+  pkt.r_hzn = ((unsigned long)servo_val[3] * 255) / 180;
+  pkt.l_flg = 1;
+  pkt.r_flg = 1;
+
+  udp_multi.beginPacketMulticast(MULTI_IP,MULTI_PORT,HOST_IP);
+  udp_multi.write((char*)&pkt, sizeof(pkt));
+  udp_multi.endPacket();
 }
 //----------------------------------------------------------------------
 void loop(void) {
   server.handleClient();
-  udp_loop();
+  udp_loop(udp);
+  if(!Bcast)udp_loop(udp_multi);
   timer();
   servo_ctrl();
 }

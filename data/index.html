@@ -17,7 +17,7 @@
   <H1>
   Servo Controler
   </H1>
-  <p>[<a href='/Propo'>Propo mode</a>] [<a href='/List'>IP List</a>] [<a href='/Setting'>Setting</a>]</p>
+  <p>[<a href='/Propo'>Propo mode</a>] [<a href='/Setting'>Setting</a>]</p>
   <form name='inputform' action='/Ctrl' method='POST' target='iframe'>
    Servo0:<br><input type='range' name='SERVO0' value='" + String(servo_val[0]) + "' min='0' max='180' step='1' onChange='formsubmit()'><br>
    Servo1:<br><input type='range' name='SERVO1' value='" + String(servo_val[1]) + "' min='0' max='180' step='1' onChange='formsubmit()'><br>
