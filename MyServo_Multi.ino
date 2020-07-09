@@ -9,6 +9,7 @@
 //   P14 WiFiモード選択 1: WIFI_AP(ESP_固有ID), 0:WIFI_STA(設定値)
 //   P16 未使用
 // ****************************************************************
+// test
 
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
